@@ -1,0 +1,254 @@
+Cowrie Honeypot with Graylog
+
+Cowrie Installation
+1.	Download Ubuntu version 16.04 and ensure that Virtual Machine network setting is set to bridged connection ( or nat ) 
+2.	First install system-wide support for Python ubuntu virtual environment and other dependencies 
+    $ sudo apt-get install git python-virtualenv libssl-dev libffi-dev build-essential libpython3-dev python3-minimal authbind virtualenv
+3.	Create a non-root user to be use for the honeypot and switch to user
+
+$ sudo adduser --disabled-password cowrie
+
+“Adding user 'cowrie' ...
+Adding new group 'cowrie' (1002) ...
+Adding new user 'cowrie' (1002) with group 'cowrie' ...
+Changing the user information for cowrie
+Enter the new value, or press ENTER for the default
+Full Name []:
+Room Number []:
+Work Phone []:
+Home Phone []:
+Other []:
+Is the information correct? [Y/n]”
+
+$ sudo su - cowrie
+
+4.	Download Cowrie via github and enter directory
+$ git clone http://github.com/cowrie/cowrie
+
+“Cloning into 'cowrie'...
+remote: Counting objects: 2965, done.
+remote: Compressing objects: 100% (1025/1025), done.
+remote: Total 2965 (delta 1908), reused 2962 (delta 1905), pack-reused 0
+Receiving objects: 100% (2965/2965), 3.41 MiB | 2.57 MiB/s, done.
+Resolving deltas: 100% (1908/1908), done.
+Checking connectivity... done.”
+
+$ cd cowrie
+
+5.	Create a virtual environment for Cowrie , ensure that directory is at /home/cowrie/cowrie ( can be check using pwd command ) 
+$ pwd
+“/home/cowrie/cowrie”
+$ virtualenv --python=python3 cowrie-env
+“New python executable in ./cowrie/cowrie-env/bin/python
+Installing setuptools, pip, wheel...done.”
+
+6.	Activate virtual environment and install packages
+$ source cowrie-env/bin/activate
+(cowrie-env) $ pip install --upgrade pip
+(cowrie-env) $ pip install --upgrade -r requirements.txt
+
+7.	Set up Telnet Configuration , Navigate to /home/cowrie/cowrie/etc. The configuration for Cowrie is stored in cowrie.cfg.dist and cowrie.cfg. Both files are read on startup, where entries from cowrie.cfg take precedence. The .dist file can be overwritten by upgrades, cowrie.cfg will not be touched. To run with a standard configuration, there is no need to change anything. To enable telnet, for example, create cowrie.cfg and input only the following:
+[telnet]
+enabled = true
+
+8.	Starting Cowrie , Start Cowrie with the cowrie command. You can add the cowrie/bin directory to your path if desired. An existing virtual environment is preserved if activated, otherwise Cowrie will attempt to load the environment called “cowrie-env”:
+$ bin/cowrie start
+
+“Using default Python virtual environment “/home/osboxes/cowrie/cowrie-env”
+Starting cowrie: [twistd –unmask=0022 –pidfile=var/run/cowrie.pid –logger cowrie.python
+.logfile.logger cowrie ]….”
+
+9.	IP Tables setup , in order to make Cowrie accessible on the SSH and telnet Port 
+The following firewall rule will forward incoming traffic on port 22 to port 2222 on Linux:
+$ sudo iptables -t nat -A PREROUTING -p tcp --dport 22 -j REDIRECT --to-port 2222
+
+	Or for telnet ,port 23 
+
+$ sudo iptables -t nat -A PREROUTING -p tcp --dport 23 -j REDIRECT --to-port 2223
+
+
+
+
+ 
+Graylog Installation 
+Three main components will be required for the installation of Graylogs . OpenJDK , Elasticsearch and MongoDB
+
+Install OpenJDK 
+1.	First run an update command to ensure everything is up to date and then install Java
+sudo apt update
+
+sudo apt install -y apt-transport-https openjdk-8-jre-headless uuid-runtime pwgen curl dirmngr
+2.	Verify if java version is “1.8.0_191” or higher 
+java -version
+
+“openjdk version "1.8.0_191"
+OpenJDK Runtime Environment (build 1.8.0_191-8u191-b12-2ubuntu0.18.04.1-b12)
+OpenJDK 64-Bit Server VM (build 25.191-b12, mixed mode)”
+
+
+Install Elasticsearch
+1.	Download and install GPG signing key 
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+2.	Set up Elasticsearch Repository 
+echo "deb https://artifacts.elastic.co/packages/6.x/apt stable main" | sudo tee -a /etc/apt/sources.list.d/elastic-6.x.list
+3.	Update the repository and install Elasticsearch package
+sudo apt update
+sudo apt install -y elasticsearch
+4.	Make Elasticsearch to start automatically during system startup
+sudo systemctl enable elasticsearch
+
+5.	Edit the configuration file to set the cluster name to show graylog 
+sudo nano /etc/elasticsearch/elasticsearch.yml
+
+cluster.name: graylog
+6.	Save , restart elasticsearch and wait for at least one minute for Elastic to restart
+sudo systemctl restart elasticsearch
+7.	Elasticsearch will now be listening to port 9200 for HTTP request , use CURL to check response 
+curl -X GET http://localhost:9200
+8.	Make sure that output shows the cluster name as graylog 
+
+“{
+  "name" : "bgVbYrc",
+  "cluster_name" : "graylog",
+  "cluster_uuid" : "-wECQlwnSZWftd_XdWSz-g",
+  "version" : {
+    "number" : "6.6.1",
+    "build_flavor" : "default",
+    "build_type" : "deb",
+    "build_hash" : "1fd8f69",
+    "build_date" : "2019-02-13T17:10:04.160291Z",
+    "build_snapshot" : false,
+    "lucene_version" : "7.6.0",
+    "minimum_wire_compatibility_version" : "5.6.0",
+    "minimum_index_compatibility_version" : "5.0.0"
+  },
+  "tagline" : "You Know, for Search"
+}”
+
+Install MongoDB
+1.	Import public key 
+sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 9DA31620334BD75D9DCB49F368818C72E52529D4
+2.	Set up MongoDB Repository
+echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu xenial/mongodb-org/4.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-4.0.list
+3.	Update the repository and install MongoDB package 
+sudo apt update
+sudo apt install -y mongodb-org
+4.	Start MongoDB and enable it to start automatically 
+sudo systemctl start mongod
+sudo systemctl enable mongod
+
+Install Graylog 
+1.	Download and install Graylog 3.x repository and install
+wget https://packages.graylog2.org/repo/packages/graylog-3.0-repository_latest.deb
+sudo dpkg -i graylog-3.0-repository_latest.deb
+2.	Update repository and install server
+sudo apt update
+sudo apt install -y graylog-server
+
+ 
+Setup  Graylog 
+Graylog is now installed and will be required to be configured 
+1.	Set a secret to secure user password using pwgen command 
+pwgen -N 1 -s 96
+the output should look like 
+fGoTI07CooB6xNy5sdPVSKSuq6QSu2QyWf6G9z3haolgwbERTQ9ZbfbF6hxRYbJMMAlEZX7CXHxJLBkNyfM0420u8aFuZy9M
+2.	Edit the server.conf file for graylog configuration
+sudo nano /etc/graylog/server/server.conf
+Place the secret like below.
+password_secret = fGoTI07CooB6xNy5sdPVSKSuq6QSu2QyWf6G9z3haolgwbERTQ9ZbfbF6hxRYbJMMAlEZX7CXHxJLBkNyfM0420u8aFuZy9M
+3.	Set a secure web interface password using SHA 256 
+echo -n yourpassword | sha256sum
+the output should look like 
+e3c652f0ba0b4801205814f8b6bc49672c4c74e25b497770bb89b22cdeb4e951
+4.	Edit server.conf file to place the hash password 
+sudo nano /etc/graylog/server/server.conf
+Place the hash password.
+root_password_sha2 = e3c652f0ba0b4801205814f8b6bc49672c4c74e25b497770bb89b22cdeb4e951
+
+You can set up email address admin user.
+root_email = "itzgeek.web@gmail.com"
+Set timezone of root (admin) user.
+root_timezone = UTC
+Set only one master node by defining the below variable. If you add a second Graylog node, set this to false to make the second node as a slave as the Master node does some periodic tasks that slave nodes won’t perform.
+is_master = true
+Set the number of log messages to keep per index; it is recommended to have several smaller indices instead of larger ones.
+elasticsearch_max_docs_per_index = 20000000
+The following parameter defines to have a total number of indices if this number is reached old index will be deleted.
+elasticsearch_max_number_of_indices = 20
+Shards setting rely on the number of nodes in the particular Elasticsearch cluster. If you have only one node, set it as 1.
+elasticsearch_shards = 1
+3.	This setting defines the number of replicas for your indices. If you have only one node in the Elasticsearch cluster, then set it as 0.
+elasticsearch_replicas = 0
+
+Setup Graylog Web Interface 
+1.	Edit Web interface to configutre Graylog web interface by editing server.conf file via path 
+sudo nano /etc/graylog/server/server.conf
+
+2.	Update the below entry to suit your system IP which will be used to access Graylog web interface
+http_bind_address = your-server-ip:9000
+3.	Restart Graylog service.
+sudo systemctl restart graylog-server
+4.	Make Graylog server to start automatically on system startup.
+sudo systemctl enable graylog-server
+5.	You can check out the server startup logs, and it will be useful for you to troubleshoot Graylog in case of an issue.
+sudo tail -f /var/log/graylog-server/server.log
+6.	On the successful start of graylog-server, you should get the following message in the log file.
+2019-02-22T10:07:49.398+05:30 INFO  [ServerBootstrap] Graylog server up and running.
+7.	The web interface will now be listening on port 9000, point your browser to
+http://ip.add.re.ss:9000
+8.	Login with username admin and the password you configured at root_password_sha2 on server.conf. 
+ 
+Configure
+Cowrie Configuration
+1.	Open the Cowrie configuration file and uncomment these 3 lines:
+[output_localsyslog]
+facility = USER
+format = text
+2.	Restart Cowrie
+Graylog Configuration
+3.	Open the Graylog web interface and click on the System drop-down in the top menu. From the drop-down menu select Inputs. Select Raw UDP from the drop-down menu and click the Launch new input button. In the modal dialog enter the following information:
+**Title:** Cowrie
+**Port:** 8514
+**Bind address:** 127.0.0.1
+4.	Then click Launch.
+Syslog Configuration
+Create a rsyslog configuration file in /etc/rsyslog.d:
+$ sudo nano /etc/rsyslog.d/85-graylog.conf
+5.	Add the following lines to the file:
+$template GRAYLOGRFC5424,"<%pri%>%protocol-version% %timestamp:::date-rfc3339% %HOSTNAME% %app-name% %procid% %msg%\n"
+*.* @<graylog-server-ip>:8514;GRAYLOGRFC5424
+6.	Save and quit.
+7.	Restart rsyslog:
+$ sudo service rsyslog restart
+
+Cowrie startup
+8.	Redirect to ~ /cowrie
+Cd ~/cowrie 
+9.	And use command 
+cowrie@cowrie:~/cowrie$ bin/cowrie start   
+                                          
+Using default Python virtual environment "/home/cowrie/cowrie/cowrie-env"             
+Starting cowrie: [twistd   --umask 0022 --pidfile var/run/cowrie.pid --logger cowrie.python.logfile.logger cowrie ]...
+
+
+
+
+
+Test
+As Cowrie supports SSH and Telnet , will test for both ports 
+SSH
+Attempting to connect to Cowrie SSH (10.255.0.36) from my local PC (10.255.0.9) using username “kyletest1”and 3 password attempts “testone” , “testtwo” and “testthree”
+"INSERT IMAGE HERE " 
+
+Back at cowrie logs , we can see that it has logged the 3 connection attempts and listed my IP ,username and password  
+"INSERT IMAGE HERE "
+
+And successfully imported to Graylog 
+"INSERT IMAGE HERE " 
+
+Telnet
+Telnet Cowrie logs using username and password as “kyletest1”
+ 
+
+Telnet Cowrie to Graylogs
+ 
